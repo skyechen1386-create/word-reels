@@ -1,0 +1,104 @@
+{
+  "schema": "wordreels-word-v1",
+  "id": "de-haarschnitt-nomen",
+  "language": "de",
+  "lemma": "Haarschnitt",
+  "displayForm": "der Haarschnitt",
+  "grammar": {
+    "pos": "Nomen",
+    "gender": "maskulin",
+    "article": "der",
+    "plural": "die Haarschnitte",
+    "level": "A2-B1"
+  },
+  "meaning": {
+    "zh": [
+      "发型",
+      "剪发",
+      "剪出来的发型"
+    ],
+    "coreZh": "剪出来的发型；剪发"
+  },
+  "definition": {
+    "de": "Ein Haarschnitt ist die Art, wie Haare geschnitten sind.",
+    "zh": "Haarschnitt 指头发被剪出来的样子，也可以表示剪头发这件事。"
+  },
+  "pronunciation": {
+    "ipa": "ˈhaːɐ̯ˌʃnɪt",
+    "syllables": [
+      "Haar",
+      "schnitt"
+    ],
+    "notesZh": [
+      "Haar 中的 a 是长音。",
+      "sch 读作 /ʃ/。",
+      "Schnitt 中的 i 是短音 /ɪ/。"
+    ]
+  },
+  "wordBuilding": {
+    "type": "compound",
+    "parts": [
+      {
+        "part": "Haar",
+        "meaningZh": "头发",
+        "role": "限定对象"
+      },
+      {
+        "part": "Schnitt",
+        "meaningZh": "剪法；剪出来的形状",
+        "role": "核心词"
+      }
+    ],
+    "structureZh": "Haar + Schnitt，即头发被剪出来的形状。",
+    "noteZh": "最后一个成分 Schnitt 决定整体性别，因此是 der Haarschnitt。"
+  },
+  "mnemonic": {
+    "textZh": "把 Schnitt 中的 tt 想象成两把并排的剪刀。",
+    "type": "image",
+    "warningZh": "这是人为记忆联想，不等于真实词源。"
+  },
+  "examples": [
+    {
+      "de": "Ich brauche einen neuen Haarschnitt.",
+      "zh": "我需要剪一个新发型。"
+    }
+  ],
+  "collocations": [
+    {
+      "de": "einen Haarschnitt brauchen",
+      "zh": "需要剪头发"
+    },
+    {
+      "de": "mit dem Haarschnitt zufrieden sein",
+      "zh": "对发型满意"
+    }
+  ],
+  "synonyms": [
+    {
+      "word": "die Frisur",
+      "differenceZh": "Frisur 强调整体造型；Haarschnitt 更强调剪出来的样式或剪发本身。"
+    }
+  ],
+  "antonyms": [],
+  "contrasts": [
+    {
+      "word": "die Haare",
+      "differenceZh": "表示头发本身，不表示剪出来的造型。"
+    }
+  ],
+  "reviewMeta": {
+    "generalFrequency": 4,
+    "examRelevance": 2,
+    "dailyLifeRelevance": 4,
+    "personalRelevance": 3,
+    "priorityScore": 3.25,
+    "priorityTier": "P3"
+  },
+  "tags": [
+    "A2-B1",
+    "Nomen",
+    "Alltag",
+    "Friseur"
+  ],
+  "source": "Duden / Gebrauch"
+}

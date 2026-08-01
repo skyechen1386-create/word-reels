@@ -1,0 +1,97 @@
+{
+  "schema": "wordreels-word-v1",
+  "language": "de",
+  "lemma": "单词原形",
+  "displayForm": "带冠词或固定搭配的显示形式",
+  "grammar": {
+    "pos": "Nomen / Verb / Adjektiv / Adverb",
+    "gender": "maskulin / feminin / neutral（名词可选）",
+    "article": "der / die / das（名词可选）",
+    "plural": "复数（名词可选）",
+    "level": "A1-C2",
+    "forms": "动词三项主要形式（动词可选）",
+    "separable": false
+  },
+  "meaning": {
+    "zh": [
+      "中文义项1",
+      "中文义项2"
+    ],
+    "coreZh": "最核心的简短中文释义"
+  },
+  "definition": {
+    "de": "简明德语解释",
+    "zh": "德语解释对应的中文"
+  },
+  "pronunciation": {
+    "ipa": "IPA（不确定时留空）",
+    "syllables": [
+      "音节1",
+      "音节2"
+    ],
+    "notesZh": [
+      "发音提示"
+    ]
+  },
+  "wordBuilding": {
+    "type": "compound / prefix / suffix / derived / simple",
+    "parts": [
+      {
+        "part": "构词成分",
+        "meaningZh": "中文含义",
+        "role": "作用"
+      }
+    ],
+    "structureZh": "整体意义如何形成",
+    "noteZh": "连接成分或语法提示"
+  },
+  "mnemonic": {
+    "textZh": "联想记忆",
+    "type": "compound / image / scene / contrast / semantic / prefix / suffix / loanword",
+    "warningZh": "这是人为记忆联想，不等于真实词源。"
+  },
+  "examples": [
+    {
+      "de": "德语例句",
+      "zh": "中文翻译"
+    }
+  ],
+  "collocations": [
+    {
+      "de": "固定搭配",
+      "zh": "中文"
+    }
+  ],
+  "synonyms": [
+    {
+      "word": "近义词",
+      "differenceZh": "与本词的区别"
+    }
+  ],
+  "antonyms": [
+    {
+      "word": "反义词",
+      "differenceZh": "与本词的区别"
+    }
+  ],
+  "contrasts": [
+    {
+      "word": "易混词",
+      "differenceZh": "区别"
+    }
+  ],
+  "reviewMeta": {
+    "generalFrequency": 3,
+    "examRelevance": 3,
+    "dailyLifeRelevance": 3,
+    "personalRelevance": 3,
+    "priorityScore": 3.0,
+    "priorityTier": "P3"
+  },
+  "tags": [
+    "等级",
+    "词性",
+    "主题"
+  ],
+  "source": "Duden / Gebrauch"
+}
