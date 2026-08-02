@@ -226,6 +226,7 @@ const TEMPLATE_CARD = {"schema":"wordreels-word-v1","language":"de","lemma":"单
 const DB_NAME="WordReelsCardsDB", DB_VERSION=1;
 let db, selectedNoteId=null, currentQueue=[], currentCard=null, currentNote=null, revealed=false;
 let sessionStartCount=0, sessionAnswered=0;
+let relearnQueue=[], sessionRelearnCounts=new Map(), relearnWaitTimer=null;
 let autoSpeak=localStorage.getItem("wrc_auto_speak")!=="false";
 let dailyNewLimit=Math.max(0,Number(localStorage.getItem("wrc_daily_new_limit")||30));
 let maxReviewLimit=Math.max(0,Number(localStorage.getItem("wrc_max_review_limit")||200));
@@ -562,15 +563,15 @@ async function toggleSuspend(){
   tx.objectStore("cards").put({...c,suspended:!c.suspended});await done;
   await openDetail(selectedNoteId);await dashboard()
 }
-function schedule(card,rating,at=Date.now()){
+function schedule(card,rating,at=Date.now(),againDelayMs=10*60000){
   const MIN=60000,HOUR=3600000,DAY=86400000;
   let stability=card.stabilityDays||0,difficulty=card.difficulty||5,interval=card.intervalMs||0,lapses=card.lapses||0,state=card.state;
   if(card.reps===0){
-    if(rating==="again"){interval=10*MIN;stability=.12;difficulty=Math.min(10,difficulty+.6);lapses++}
+    if(rating==="again"){interval=againDelayMs;stability=.12;difficulty=Math.min(10,difficulty+.6);lapses++;state="relearning"}
     if(rating==="hard"){interval=30*MIN;stability=.35;difficulty=Math.min(10,difficulty+.2)}
     if(rating==="good"){interval=DAY;stability=1;difficulty=Math.max(1,difficulty-.1);state="review"}
   }else{
-    if(rating==="again"){interval=10*MIN;stability=Math.max(.12,stability*.45);difficulty=Math.min(10,difficulty+.7);lapses++;state="relearning"}
+    if(rating==="again"){interval=againDelayMs;stability=Math.max(.12,stability*.45);difficulty=Math.min(10,difficulty+.7);lapses++;state="relearning"}
     if(rating==="hard"){stability=Math.max(.5,stability*1.18);interval=Math.max(6*HOUR,stability*DAY);difficulty=Math.min(10,difficulty+.15);state="review"}
     if(rating==="good"){
       const factor=Math.max(1.7,2.75-difficulty*.08);
@@ -579,6 +580,54 @@ function schedule(card,rating,at=Date.now()){
   }
   if(interval>HOUR)interval*=.95+Math.random()*.10;
   return {dueAt:Math.round(at+interval),intervalMs:Math.round(interval),stabilityDays:stability,difficulty,lapses,state}
+}
+function relearnConfig(level){
+  if(level<=1)return {queueDelayMs:3*60000,dueDelayMs:10*60000,gap:8,label:"10分钟"};
+  if(level===2)return {queueDelayMs:90*1000,dueDelayMs:5*60000,gap:5,label:"5分钟"};
+  return {queueDelayMs:45*1000,dueDelayMs:2*60000,gap:3,label:"2分钟"}
+}
+function clearRelearnWaitTimer(){
+  if(relearnWaitTimer){clearTimeout(relearnWaitTimer);relearnWaitTimer=null}
+}
+function enqueueRelearn(card,level,reviewedAt){
+  const cfg=relearnConfig(level);
+  relearnQueue=relearnQueue.filter(item=>item.card.id!==card.id);
+  relearnQueue.push({
+    card,
+    level,
+    availableAt:reviewedAt+cfg.queueDelayMs,
+    readyAfterAttempt:sessionAnswered+cfg.gap
+  })
+}
+function injectReadyRelearnCards(){
+  const now=Date.now(),ready=[],waiting=[];
+  for(const item of relearnQueue){
+    if(sessionAnswered>=item.readyAfterAttempt||now>=item.availableAt)ready.push(item);
+    else waiting.push(item)
+  }
+  relearnQueue=waiting;
+  for(const item of shuffle(ready)){
+    if(currentQueue.some(card=>card.id===item.card.id))continue;
+    const insertAt=Math.min(currentQueue.length,Math.floor(Math.random()*Math.min(3,currentQueue.length+1)));
+    currentQueue.splice(insertAt,0,item.card)
+  }
+}
+function showRelearnWaiting(){
+  clearRelearnWaitTimer();
+  if(!relearnQueue.length)return finishReview();
+  const next=Math.min(...relearnQueue.map(item=>item.availableAt));
+  const remaining=Math.max(0,next-Date.now());
+  const seconds=Math.max(1,Math.ceil(remaining/1000));
+  $("#ratingBar").classList.add("hidden");
+  $("#reviewStatus").textContent=`普通卡已完成 · 等待重学 ${relearnQueue.length} 张`;
+  $("#reviewProgress").style.width="100%";
+  $("#reviewStage").innerHTML=`<article class="word-card finished"><h2>还有 ${relearnQueue.length} 张忘记卡等待重现</h2>
+    <p class="sub">最近一张约 ${seconds} 秒后可复习。你也可以结束本轮；数据库中的 10/5/2 分钟到期时间仍会保留。</p>
+    <button class="btn primary" id="continueWaiting">等待并继续</button>
+    <button class="btn" id="finishNow" style="margin-top:10px">结束本轮</button></article>`;
+  $("#continueWaiting").onclick=()=>showCurrent();
+  $("#finishNow").onclick=finishReview;
+  relearnWaitTimer=setTimeout(()=>showCurrent(),Math.min(remaining+50,30000))
 }
 function weightedNewSelection(cards,noteMap,limit){
   if(limit<=0)return [];
@@ -596,6 +645,16 @@ function reviewQueueScore(card,note,now=Date.now()){
   const memory=Math.max(1,Math.min(5,(card.difficulty||5)/2+(card.lapses||0)*.15));
   return overdue*.45+memory*.30+priorityValue(note)*.25
 }
+function weightedShuffle(cards,weightFn){
+  return cards
+    .map(card=>{
+      const weight=Math.max(.01,Number(weightFn(card))||.01);
+      const random=Math.max(Number.EPSILON,Math.random());
+      return {card,key:-Math.log(random)/weight}
+    })
+    .sort((a,b)=>a.key-b.key)
+    .map(x=>x.card)
+}
 async function startReview(){
   const now=Date.now(),allCards=await all("cards");
   const due=allCards.filter(c=>!c.suspended&&c.dueAt<=now);
@@ -603,20 +662,31 @@ async function startReview(){
   const notes=await all("notes"),noteMap=new Map(notes.map(n=>[n.id,n]));
   const learnedToday=allCards.filter(c=>c.firstReviewAt&&c.firstReviewAt>=startOfToday()).length;
   const remainingNew=Math.max(0,dailyNewLimit-learnedToday);
-  const old=due.filter(c=>c.reps>0).sort((a,b)=>reviewQueueScore(b,noteMap.get(b.noteId),now)-reviewQueueScore(a,noteMap.get(a.noteId),now));
-  const fresh=weightedNewSelection(due.filter(c=>c.reps===0),noteMap,remainingNew);
+  const old=weightedShuffle(
+    due.filter(c=>c.reps>0),
+    c=>reviewQueueScore(c,noteMap.get(c.noteId),now)
+  );
+  const fresh=shuffle(weightedNewSelection(due.filter(c=>c.reps===0),noteMap,remainingNew));
   currentQueue=[...old,...fresh];
   if(maxReviewLimit>0)currentQueue=currentQueue.slice(0,maxReviewLimit);
   if(!currentQueue.length){alert(`今日新卡上限已用完（${dailyNewLimit}张），当前没有旧卡需要复习。`);return}
   sessionStartCount=currentQueue.length;sessionAnswered=0;
+  relearnQueue=[];sessionRelearnCounts=new Map();clearRelearnWaitTimer();
   $("#home").classList.add("hidden");$("#reviewView").classList.remove("hidden");await showCurrent()
 }
 async function showCurrent(){
-  if(!currentQueue.length)return finishReview();
+  clearRelearnWaitTimer();
+  injectReadyRelearnCards();
+  if(!currentQueue.length){
+    if(relearnQueue.length)return showRelearnWaiting();
+    return finishReview()
+  }
   currentCard=currentQueue[0];currentNote=await one("notes",currentCard.noteId);revealed=false;
   $("#ratingBar").classList.add("hidden");
-  $("#reviewStatus").textContent=`剩余 ${currentQueue.length} · 已完成 ${sessionAnswered}`;
-  $("#reviewProgress").style.width=`${sessionStartCount?sessionAnswered/sessionStartCount*100:0}%`;
+  const waitingCount=relearnQueue.length;
+  $("#reviewStatus").textContent=`队列 ${currentQueue.length} · 等待重学 ${waitingCount} · 本轮作答 ${sessionAnswered}`;
+  const completed=Math.max(0,sessionStartCount-currentQueue.filter(c=>!sessionRelearnCounts.has(c.id)).length);
+  $("#reviewProgress").style.width=`${sessionStartCount?Math.min(100,completed/sessionStartCount*100):0}%`;
   $("#reviewStage").innerHTML=`<article class="word-card" id="wordCard">
     <button class="speak" id="speakBtn">🔊</button>
     <div class="word">${esc(display(currentNote))}</div>
@@ -648,16 +718,32 @@ function reveal(){
   $("#speakBtn").onclick=e=>{e.stopPropagation();speak(display(n))};
   $("#deepBtn").onclick=e=>{e.stopPropagation();openDetail(n.id)};
   $("#ratingBar").classList.remove("hidden");
-  $("#againHint").textContent=delay(schedule(currentCard,"again").dueAt-Date.now());
+  const nextAgainLevel=(sessionRelearnCounts.get(currentCard.id)||0)+1;
+  const nextAgainCfg=relearnConfig(nextAgainLevel);
+  $("#againHint").textContent=delay(nextAgainCfg.dueDelayMs);
   $("#hardHint").textContent=delay(schedule(currentCard,"hard").dueAt-Date.now());
   $("#goodHint").textContent=delay(schedule(currentCard,"good").dueAt-Date.now())
 }
 async function rate(rating){
-  if(!revealed)return;const result=schedule(currentCard,rating),reviewedAt=Date.now();
+  if(!revealed)return;
+  const reviewedAt=Date.now();
+  const nextLevel=rating==="again"?(sessionRelearnCounts.get(currentCard.id)||0)+1:0;
+  const cfg=rating==="again"?relearnConfig(nextLevel):null;
+  const result=schedule(currentCard,rating,reviewedAt,cfg?.dueDelayMs);
+  const updatedCard={...currentCard,...result,reps:(currentCard.reps||0)+1,lastRating:rating,lastReviewAt:reviewedAt,firstReviewAt:currentCard.firstReviewAt||reviewedAt};
   const tx=db.transaction(["cards","logs"],"readwrite"),done=txP(tx);
-  tx.objectStore("cards").put({...currentCard,...result,reps:(currentCard.reps||0)+1,lastRating:rating,lastReviewAt:reviewedAt,firstReviewAt:currentCard.firstReviewAt||reviewedAt});
-  tx.objectStore("logs").add({cardId:currentCard.id,noteId:currentCard.noteId,rating,reviewedAt,dueAt:result.dueAt,intervalMs:result.intervalMs});
-  await done;sessionAnswered++;currentQueue.shift();await showCurrent()
+  tx.objectStore("cards").put(updatedCard);
+  tx.objectStore("logs").add({cardId:currentCard.id,noteId:currentCard.noteId,rating,reviewedAt,dueAt:result.dueAt,intervalMs:result.intervalMs,relearnLevel:nextLevel||undefined});
+  await done;
+  currentQueue.shift();sessionAnswered++;
+  if(rating==="again"){
+    sessionRelearnCounts.set(updatedCard.id,nextLevel);
+    enqueueRelearn(updatedCard,nextLevel,reviewedAt)
+  }else{
+    relearnQueue=relearnQueue.filter(item=>item.card.id!==updatedCard.id);
+    sessionRelearnCounts.delete(updatedCard.id)
+  }
+  await showCurrent()
 }
 function finishReview(){
   $("#ratingBar").classList.add("hidden");$("#reviewProgress").style.width="100%";$("#reviewStatus").textContent=`本次完成 ${sessionAnswered}`;
@@ -667,7 +753,7 @@ function finishReview(){
 }
 async function exitReview(){
   speechSynthesis?.cancel();$("#reviewView").classList.add("hidden");$("#home").classList.remove("hidden");
-  currentQueue=[];currentCard=null;currentNote=null;await dashboard()
+  clearRelearnWaitTimer();currentQueue=[];relearnQueue=[];sessionRelearnCounts=new Map();currentCard=null;currentNote=null;await dashboard()
 }
 function speak(text){
   if(!("speechSynthesis" in window))return;speechSynthesis.cancel();
