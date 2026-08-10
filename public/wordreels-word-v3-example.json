@@ -1,0 +1,94 @@
+[
+  {
+    "schema": "wordreels-word-v3",
+    "id": "de-veraendern-verb",
+    "language": "de",
+    "lemma": "verändern",
+    "displayForm": "sich verändern",
+    "grammar": {
+      "pos": "Verb",
+      "level": "B1",
+      "reflexive": true,
+      "separable": false,
+      "forms": {
+        "Präsens": "verändert sich",
+        "Präteritum": "veränderte sich",
+        "Perfekt": "hat sich verändert"
+      }
+    },
+    "dictionaryMeaning": {
+      "directZh": ["改变", "使发生变化", "发生变化"]
+    },
+    "rankedMeanings": [
+      {
+        "rank": 1,
+        "zh": "发生变化；变得不同",
+        "de": "anders werden",
+        "usageZh": "主体自身发生改变，通常使用 sich verändern。",
+        "contexts": [{
+          "sceneZh": "情况、生活、社会或人的外貌发生变化",
+          "patternDe": "sich stark verändern",
+          "exampleDe": "Die Situation hat sich stark verändert.",
+          "exampleZh": "情况发生了很大变化。"
+        }]
+      },
+      {
+        "rank": 2,
+        "zh": "改变某人或某物",
+        "de": "jemanden oder etwas anders machen",
+        "usageZh": "主语主动使宾语发生改变，不使用反身形式。",
+        "contexts": [{
+          "sceneZh": "经历、技术或决定改变某个对象",
+          "patternDe": "etwas verändern",
+          "exampleDe": "Diese Erfahrung hat ihn verändert.",
+          "exampleZh": "这段经历改变了他。"
+        }]
+      }
+    ],
+    "definition": {
+      "de": "Etwas wird anders oder man macht etwas anders.",
+      "zh": "某物变得不同，或者某人使某物发生改变。"
+    },
+    "coreAssociation": {
+      "de": "Etwas ist danach nicht mehr so wie vorher.",
+      "zh": "某物之后不再和以前一样。"
+    },
+    "pronunciation": {
+      "ipa": "fɛɐ̯ˈʔɛndɐn",
+      "syllables": ["ver", "än", "dern"],
+      "display": "ver · än · dern",
+      "notesZh": ["重音落在 än 上。"]
+    },
+    "wordBuilding": {
+      "type": "prefix",
+      "parts": [
+        { "part": "ver-", "meaningZh": "表示变化、转变" },
+        { "part": "ändern", "meaningZh": "改变" }
+      ],
+      "structureZh": "ver- + ändern，表示进入改变后的状态。"
+    },
+    "connectionMemory": [
+      { "type": "wordFamily", "de": "ändern – die Änderung – verändert", "zh": "改变——变化——已经改变的" },
+      { "type": "usage", "de": "etwas verändern / sich verändern", "zh": "改变某物／自身发生变化" }
+    ],
+    "mnemonic": {
+      "zh": "可以把它记成：原来的状态被改变，结果已经不再一样。",
+      "warningZh": "这是人为设计的记忆方法，不是真实词源。"
+    },
+    "collocations": [
+      {
+        "de": "sich stark verändern",
+        "zh": "发生很大变化",
+        "exampleDe": "Die Stadt hat sich stark verändert.",
+        "exampleZh": "这座城市发生了很大变化。"
+      },
+      {
+        "de": "das Leben verändern",
+        "zh": "改变生活",
+        "exampleDe": "Das Internet hat unser Leben verändert.",
+        "exampleZh": "互联网改变了我们的生活。"
+      }
+    ],
+    "tags": ["B1", "Verb", "Veränderung"]
+  }
+]
