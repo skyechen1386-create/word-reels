@@ -25,7 +25,6 @@ export interface WordEntry {
   mnemonic?: { zh?: string; textZh?: string; de?: string; warningZh?: string }
   collocations?: Collocation[]
   tags?: string[]
-  myNote?: string
   source?: string
   createdAt?: number
   updatedAt?: number
