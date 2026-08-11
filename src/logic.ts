@@ -4,9 +4,47 @@ export const angleLabels: Record<StudyAngle, string> = {
   recognition: '德语 → 中文', production: '中文 → 德语', meaning_context: '常用义与语境',
   pronunciation: '拼读分段', word_building: '构词拆解', connection: '联系辅助记忆',
   collocation: '固定搭配', collocation_example: '搭配例句', full: '完整理解',
+  sentence: '造句练习', image: '图片联想',
 }
 
 const DAY = 86_400_000
+
+// ---- FSRS-4.5 间隔重复算法 ----
+// 参考 https://github.com/open-spaced-repetition/fsrs4anki 的默认参数（19 个权重）。
+// 目标记忆保持率固定为 90%（业界默认值），在该目标下，间隔天数在数学上正好等于 stability（天）。
+const FSRS_W = [
+  0.4072, 1.1829, 3.1262, 15.4722, 7.2102, 0.5316, 1.0651, 0.0234, 1.616,
+  0.1544, 1.0824, 1.9813, 0.0953, 0.2975, 2.2042, 0.2407, 2.9466, 0.5034, 0.6567,
+] as const
+const FSRS_DECAY = -0.5
+const FSRS_FACTOR = Math.pow(0.9, 1 / FSRS_DECAY) - 1 // ≈ 0.2345679
+
+// 5 档评分 -> FSRS 4 档评分：1=Again 2=Again 3=Hard 4=Good 5=Easy
+// “不会”与“混淆”都视为没有成功提取记忆，同样按 Again 处理。
+const FSRS_RATING: Record<Rating, 1 | 2 | 3 | 4> = { 1: 1, 2: 1, 3: 2, 4: 3, 5: 4 }
+
+const clamp = (value: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, value))
+const fsrsInitStability = (r: 1 | 2 | 3 | 4) => FSRS_W[r - 1]
+const fsrsInitDifficulty = (r: 1 | 2 | 3 | 4) => clamp(FSRS_W[4] - (r - 3) * FSRS_W[5], 1, 10)
+const fsrsNextDifficulty = (difficulty: number, r: 1 | 2 | 3 | 4) => {
+  const reduced = difficulty - FSRS_W[6] * (r - 3)
+  return clamp(FSRS_W[7] * fsrsInitDifficulty(4) + (1 - FSRS_W[7]) * reduced, 1, 10)
+}
+const fsrsRetrievability = (elapsedDays: number, stability: number) =>
+  Math.pow(1 + (FSRS_FACTOR * elapsedDays) / stability, FSRS_DECAY)
+const fsrsNextStability = (stability: number, difficulty: number, retrievability: number, r: 1 | 2 | 3 | 4) => {
+  if (r === 1) {
+    return FSRS_W[11] * Math.pow(difficulty, -FSRS_W[12]) * (Math.pow(stability + 1, FSRS_W[13]) - 1)
+      * Math.exp(FSRS_W[14] * (1 - retrievability))
+  }
+  const hardPenalty = r === 2 ? FSRS_W[15] : 1
+  const easyBonus = r === 3 ? 1 : r === 4 ? FSRS_W[16] : 1
+  return stability * (Math.exp(FSRS_W[8]) * (11 - difficulty) * Math.pow(stability, -FSRS_W[9])
+    * (Math.exp(FSRS_W[10] * (1 - retrievability)) - 1) * hardPenalty * easyBonus + 1)
+}
+const MIN_INTERVAL_DAYS = 10 / (24 * 60) // 最短 10 分钟，避免"重来"卡片消失太久
+const MAX_INTERVAL_DAYS = 365 * 5 // 最长 5 年，避免数值发散出离谱结果
+
 const text = (value: unknown): string => {
   if (typeof value === 'string') return value.trim()
   if (Array.isArray(value)) return value.map(text).filter(Boolean).join('；')
@@ -152,6 +190,18 @@ function blankTarget(value: string, entry: WordEntry) {
   return output === value ? value : output
 }
 
+export function referenceSentences(entry: WordEntry): Array<{ de: string; zh?: string }> {
+  const output: Array<{ de: string; zh?: string }> = []
+  for (const item of entry.collocations || []) if (item.exampleDe) output.push({ de: item.exampleDe, zh: item.exampleZh })
+  for (const meaning of entry.rankedMeanings || []) for (const context of meaning.contexts || []) if (context.exampleDe) output.push({ de: context.exampleDe, zh: context.exampleZh })
+  return output
+}
+
+export function makeImageUnit(entry: WordEntry): ReviewUnit {
+  const zh = coreZh(entry)
+  return make(entry, 'image', 0, entry.displayForm, zh || entry.displayForm, '看图回忆这个词', '')
+}
+
 export function generateUnits(entry: WordEntry): ReviewUnit[] {
   const units: ReviewUnit[] = []
   const zh = coreZh(entry)
@@ -172,6 +222,7 @@ export function generateUnits(entry: WordEntry): ReviewUnit[] {
     if (item.exampleDe) units.push(make(entry, 'collocation_example', index, item.exampleZh || blankTarget(item.exampleDe, entry), item.exampleDe, item.zh || '根据语境恢复德语表达'))
   })
   units.push(make(entry, 'full', 0, entry.displayForm, zh || entry.displayForm, '完整词条检查'))
+  units.push(make(entry, 'sentence', 0, entry.displayForm, entry.displayForm, '尝试写一句包含这个词的德语句子，写完后自己对照参考例句判断'))
   return units
 }
 
@@ -192,15 +243,25 @@ export function secureShuffle<T>(items: T[]): T[] {
 }
 
 export function schedule(unit: ReviewUnit, rating: Rating, now = Date.now()): ReviewUnit {
-  const base = Math.max(.35, unit.stability || .4)
-  const first: Record<Rating, number> = { 1: 10 * 60_000, 2: 6 * 3_600_000, 3: DAY, 4: 2 * DAY, 5: 4 * DAY }
-  const multipliers: Record<Rating, number> = { 1: .25, 2: .65, 3: 1.2, 4: 1.8, 5: 2.6 }
-  const intervalMs = unit.reps === 0 ? first[rating] : Math.max(first[rating], base * multipliers[rating] * DAY)
+  const fsrsRating = FSRS_RATING[rating]
+  const isFirstReview = unit.reps === 0
+  const difficulty = isFirstReview
+    ? fsrsInitDifficulty(fsrsRating)
+    : fsrsNextDifficulty(unit.difficulty, fsrsRating)
+  let stability: number
+  if (isFirstReview) {
+    stability = fsrsInitStability(fsrsRating)
+  } else {
+    const elapsedDays = Math.max(0, (now - (unit.lastReviewAt ?? now)) / DAY)
+    const retrievability = fsrsRetrievability(elapsedDays, Math.max(.01, unit.stability))
+    stability = fsrsNextStability(Math.max(.01, unit.stability), unit.difficulty, retrievability, fsrsRating)
+  }
+  const intervalDays = clamp(stability, MIN_INTERVAL_DAYS, MAX_INTERVAL_DAYS)
+  const intervalMs = intervalDays * DAY
   return {
     ...unit, dueAt: now + intervalMs, intervalMs,
-    stability: rating === 1 ? Math.max(.35, base * .45) : Math.max(.35, base * multipliers[rating]),
-    difficulty: Math.min(10, Math.max(1, unit.difficulty + ({ 1: 1.2, 2: .7, 3: .2, 4: -.15, 5: -.45 } as Record<Rating, number>)[rating])),
-    reps: unit.reps + 1, lapses: unit.lapses + (rating === 1 ? 1 : 0), lastRating: rating, lastReviewAt: now,
+    stability, difficulty,
+    reps: unit.reps + 1, lapses: unit.lapses + (fsrsRating === 1 ? 1 : 0), lastRating: rating, lastReviewAt: now,
   }
 }
 

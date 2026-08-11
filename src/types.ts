@@ -1,4 +1,4 @@
-export type StudyAngle = 'recognition' | 'production' | 'meaning_context' | 'pronunciation' | 'word_building' | 'connection' | 'collocation' | 'collocation_example' | 'full'
+export type StudyAngle = 'recognition' | 'production' | 'meaning_context' | 'pronunciation' | 'word_building' | 'connection' | 'collocation' | 'collocation_example' | 'full' | 'sentence' | 'image'
 export type Rating = 1 | 2 | 3 | 4 | 5
 
 export interface LocalizedText { de?: string; zh?: string }
@@ -25,9 +25,11 @@ export interface WordEntry {
   mnemonic?: { zh?: string; textZh?: string; de?: string; warningZh?: string }
   collocations?: Collocation[]
   tags?: string[]
+  myNote?: string
   source?: string
   createdAt?: number
   updatedAt?: number
+  myNote?: string // 自己写的个人化联想/记忆点，只有自己看得懂也没关系，随时可编辑
   [key: string]: unknown
 }
 
@@ -59,6 +61,14 @@ export interface ReviewLog {
   responseTimeMs: number
   reviewedAt: number
   dueAt: number
+  typed?: boolean // production 角度：本次揭晓答案前是否主动输入过内容
+}
+
+export interface AnglePreset {
+  id: string
+  name: string
+  angles: StudyAngle[]
+  builtin?: boolean
 }
 
 export interface Backup {
@@ -69,4 +79,5 @@ export interface Backup {
   units: ReviewUnit[]
   logs: ReviewLog[]
   settings: Record<string, unknown>
+  images?: Array<{ entryId: string; base64: string; type: string }>
 }
