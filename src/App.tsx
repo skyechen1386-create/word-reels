@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { allEntries, allLogs, allUnits, clearLearningData, createBackup, getEntryImage, getSetting, importEntries, removeEntry, removeEntryImage, restoreBackup, saveReview, setEntryImage, setEntryNote, setSetting } from './db'
+import { allEntries, allLogs, allUnits, clearLearningData, createBackup, getEntryImage, getSetting, importEntries, importEntriesBatched, removeEntry, removeEntryImage, restoreBackup, saveReview, setEntryImage, setEntryNote, setSetting } from './db'
 import { angleLabels, extractCards, referenceSentences, schedule, secureShuffle } from './logic'
 import { angleAccuracy, dailySeries, fakeMemoryWatch, overallAccuracy, productionTypedComparison, streakDays, todayCount } from './stats'
 import type { AnglePreset, Backup, Rating, ReviewLog, ReviewUnit, StudyAngle, WordEntry } from './types'
+import Acquisition from './acquisition/Acquisition'
 
-type View = 'review' | 'library' | 'transfer' | 'settings' | 'stats'
+type View = 'review' | 'acquisition' | 'library' | 'transfer' | 'settings' | 'stats'
 type InteractionMode = 'buttons' | 'gestures'
 const angles = Object.keys(angleLabels) as StudyAngle[]
 const builtinPresets: AnglePreset[] = [
@@ -77,7 +78,9 @@ function SentenceCheck({ typed, entry }: { typed: string; entry: WordEntry }) {
 }
 
 function FullEntry({ entry, focus, onNoteChange }: { entry: WordEntry; focus?: ReviewUnit; onNoteChange?: (note: string) => void }) {
-  const grammar = entry.grammar || {}; const ranked = entry.rankedMeanings || []; const parts = entry.wordBuilding?.parts || []
+  const grammar = entry.grammar || {}; const ranked = entry.rankedMeanings || []; const parts = Array.isArray(entry.wordBuilding?.parts) ? entry.wordBuilding.parts : []
+  const pronunciationNotes = Array.isArray(entry.pronunciation?.notesZh) ? entry.pronunciation.notesZh : typeof entry.pronunciation?.notesZh === 'string' ? [entry.pronunciation.notesZh] : []
+  const wordBuildingNotes = Array.isArray(entry.wordBuilding?.notesZh) ? entry.wordBuilding.notesZh : typeof entry.wordBuilding?.notesZh === 'string' ? [entry.wordBuilding.notesZh] : []
   const connections = Array.isArray(entry.connectionMemory) ? entry.connectionMemory : entry.connectionMemory?.links || []
   const forms = grammar.forms && typeof grammar.forms === 'object' ? Object.entries(grammar.forms as Record<string, unknown>) : []
   const [note, setNote] = useState(entry.myNote || '')
@@ -93,8 +96,8 @@ function FullEntry({ entry, focus, onNoteChange }: { entry: WordEntry; focus?: R
       {ranked.length > 0 && <Section title="常用义排名与多义语境"><div className="rank-list">{ranked.sort((a, b) => a.rank - b.rank).map(item => <article key={item.rank}><i>{item.rank}</i><div><strong>{item.zh}</strong>{item.de && <p className="de-line">{item.de}</p>}{item.usageZh && <p>{item.usageZh}</p>}{item.contexts?.map((context, index) => <div className="context" key={index}><span>{context.sceneZh}</span>{context.patternDe && <b>{context.patternDe}</b>}{context.exampleDe && <p>{context.exampleDe}<small>{context.exampleZh}</small></p>}</div>)}</div></article>)}</div></Section>}
       {(entry.definition?.de || entry.definition?.zh) && <Section title="德语解释"><p className="de-line">{entry.definition?.de}</p><p>{entry.definition?.zh}</p></Section>}
       {(entry.coreAssociation?.de || entry.coreAssociation?.zh) && <Section title="德语核心联想"><p className="de-line">{entry.coreAssociation?.de}</p><p>{entry.coreAssociation?.zh}</p></Section>}
-      {(entry.pronunciation?.display || entry.pronunciation?.syllables?.length) && <Section title="拼读分段"><p className="syllables">{entry.pronunciation?.display || entry.pronunciation?.syllables?.join(' · ')}</p>{entry.pronunciation?.ipa && <p>IPA：{entry.pronunciation.ipa}</p>}{entry.pronunciation?.notesZh?.map((note, i) => <small className="block" key={i}>{note}</small>)}</Section>}
-      {parts.length > 0 && <Section title="构词拆解"><div className="parts">{parts.map((part, index) => <span key={index}><b>{part.part}</b><small>{part.meaningZh || part.meaningDe}</small></span>)}</div><p>{entry.wordBuilding?.structureZh}</p>{(entry.wordBuilding?.notesZh || []).map((note, i) => <small className="block" key={i}>{note}</small>)}</Section>}
+      {(entry.pronunciation?.display || entry.pronunciation?.syllables?.length) && <Section title="拼读分段"><p className="syllables">{entry.pronunciation?.display || entry.pronunciation?.syllables?.join(' · ')}</p>{entry.pronunciation?.ipa && <p>IPA：{entry.pronunciation.ipa}</p>}{pronunciationNotes.map((note, i) => <small className="block" key={i}>{note}</small>)}</Section>}
+      {parts.length > 0 && <Section title="构词拆解"><div className="parts">{parts.map((part, index) => <span key={index}><b>{part.part}</b><small>{part.meaningZh || part.meaningDe}</small></span>)}</div><p>{entry.wordBuilding?.structureZh}</p>{wordBuildingNotes.map((note, i) => <small className="block" key={i}>{note}</small>)}</Section>}
       {connections.length > 0 && <Section title="联系辅助记忆"><div className="connection-list">{connections.map((item, index) => <p key={index}><b>{item.de || item.title || item.content}</b><span>{item.zh}</span></p>)}</div></Section>}
       {(entry.mnemonic?.zh || entry.mnemonic?.textZh || entry.mnemonic?.de) && <Section title="人为联想"><p className="de-line">{entry.mnemonic?.de}</p><p>{entry.mnemonic?.zh || entry.mnemonic?.textZh}</p>{entry.mnemonic?.warningZh && <small className="warning">{entry.mnemonic.warningZh}</small>}</Section>}
       {(entry.examples || []).length > 0 && <Section title="例句"><div className="reference-sentences">{entry.examples?.map((example, index) => <p key={index}>{example.de}{example.zh && <small>{example.zh}</small>}</p>)}</div></Section>}
@@ -250,14 +253,231 @@ function Library({ entries, units, refresh }: { entries: WordEntry[]; units: Rev
 }
 
 function Transfer({ refresh }: { refresh: () => Promise<void> }) {
-  const [raw, setRaw] = useState(''); const [message, setMessage] = useState('')
-  const importText = async (value: string) => { try { const payload = JSON.parse(value) as unknown; if ((payload as Backup)?.schema === 'wordreels-backup-v6') { await restoreBackup(payload as Backup); setMessage('完整备份已恢复。') } else { const result = await importEntries(extractCards(payload)); setMessage(`导入完成：新增 ${result.added}，更新 ${result.updated}，生成 ${result.unitCount} 个学习单元。`) } await refresh() } catch (error) { setMessage(`导入失败：${(error as Error).message}`) } }
+  const [raw, setRaw] = useState('')
+  const [message, setMessage] = useState('')
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
+
+  const importText = async (value: string) => {
+    try {
+      const payload = JSON.parse(value) as unknown
+      if ((payload as Backup)?.schema === 'wordreels-backup-v6') {
+        setMessage('正在恢复备份...')
+        setProgress(null)
+        await restoreBackup(payload as Backup)
+        setMessage('完整备份已恢复。')
+      } else {
+        const cards = extractCards(payload)
+        setMessage(`正在导入 ${cards.length} 个词条...`)
+        setProgress({ current: 0, total: cards.length })
+
+        // 使用分批导入避免 UI 卡顿
+        const result = await importEntriesBatched(cards, (current, total) => {
+          setProgress({ current, total })
+        })
+
+        setProgress(null)
+        setMessage(`导入完成：新增 ${result.added}，更新 ${result.updated}，生成 ${result.unitCount} 个学习单元。`)
+      }
+      await refresh()
+    } catch (error) {
+      setMessage(`导入失败：${(error as Error).message}`)
+      setProgress(null)
+    }
+  }
+
   const clearAll = async () => {
     if (!confirm('将删除全部词条和各角度学习进度。设置和历史复习统计会保留。是否继续？')) return
     if (!confirm('请再次确认：清空词条与进度后只能通过之前下载的备份恢复；统计页的历史记录不受影响。')) return
-    await clearLearningData(); setRaw(''); setMessage('词库和学习单元已清空，复习历史统计已保留。'); await refresh()
+    await clearLearningData()
+    setRaw('')
+    setMessage('词库和学习单元已清空，复习历史统计已保留。')
+    await refresh()
   }
-  return <main className="page"><header className="page-title"><div><span>IMPORT & BACKUP</span><h1>导入与备份</h1><p>支持新版 v3、旧版 v1/v2 词卡和 WordReels 6 完整备份</p></div></header><div className="transfer-grid"><section><h2>导入 JSON</h2><textarea value={raw} onChange={event => setRaw(event.target.value)} placeholder="粘贴词卡 JSON，或选择文件" /><div className="row"><label className="file-button">选择 JSON<input type="file" accept="application/json,.json" onChange={async event => { const file = event.target.files?.[0]; if (file) { const value = await file.text(); setRaw(value); await importText(value) } }} /></label><button onClick={() => void importText(raw)} disabled={!raw.trim()}>导入粘贴内容</button></div></section><section><h2>完整备份</h2><p>备份包含词条、各角度复习进度、评分记录和设置，可在其他设备完整恢复。</p><button onClick={async () => download(`WordReels6备份-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(await createBackup(), null, 2))}>下载完整备份</button><small>GitHub Pages 只保存程序。手机中的词库和进度保存在该手机浏览器内。</small><div className="danger-zone"><h3>清空学习数据</h3><p>删除全部词条和学习单元，但保留设置和复习历史统计。</p><button className="danger" onClick={() => void clearAll()}>清空全部词卡与进度</button></div></section></div>{message && <div className="message">{message}</div>}</main>
+
+  const isImporting = progress !== null
+
+  return (
+    <main className="page">
+      <header className="page-title">
+        <div>
+          <span>IMPORT & BACKUP</span>
+          <h1>导入与备份</h1>
+          <p>支持新版 v3、旧版 v1/v2 词卡和 WordReels 6 完整备份</p>
+        </div>
+      </header>
+
+      <div className="transfer-grid">
+        <section>
+          <h2>导入 JSON</h2>
+          <p style={{ color: '#9aabc1', fontSize: '12px', marginBottom: '16px' }}>
+            选择 JSON 文件或粘贴词卡数据，系统会自动导入并生成学习单元。
+          </p>
+
+          {!isImporting ? (
+            <>
+              <div className="row" style={{ gap: '8px', display: 'flex', flexWrap: 'wrap' }}>
+                <label className="file-button" style={{ flex: 1, minWidth: '120px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  📁 选择 JSON 文件
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    disabled={isImporting}
+                    onChange={async event => {
+                      const file = event.target.files?.[0]
+                      if (file) {
+                        const value = await file.text()
+                        await importText(value)
+                      }
+                    }}
+                  />
+                </label>
+                <button
+                  onClick={() => setRaw('')}
+                  className="back"
+                  style={{ padding: '10px 14px', minHeight: '44px', minWidth: '60px', fontSize: 'clamp(11px, 3vw, 13px)' }}
+                >
+                  清空
+                </button>
+              </div>
+
+              <div style={{ margin: '16px 0', textAlign: 'center', color: '#7ce1d7', fontSize: '12px' }}>
+                或
+              </div>
+
+              <textarea
+                value={raw}
+                onChange={event => setRaw(event.target.value)}
+                placeholder="粘贴词卡 JSON..."
+                style={{
+                  width: '100%',
+                  minHeight: '120px',
+                  padding: '14px 14px',
+                  border: '1px solid #38516d',
+                  borderRadius: '8px',
+                  background: '#081220',
+                  color: '#eef5ff',
+                  fontSize: 'clamp(11px, 3vw, 12px)',
+                  fontFamily: 'monospace',
+                  resize: 'vertical',
+                  marginBottom: '12px',
+                  boxSizing: 'border-box',
+                }}
+              />
+
+              <button
+                onClick={() => void importText(raw)}
+                disabled={!raw.trim()}
+                className="reshuffle"
+                style={{
+                  width: '100%',
+                  padding: '14px 14px',
+                  minHeight: '44px',
+                  opacity: raw.trim() ? 1 : 0.35,
+                  cursor: raw.trim() ? 'pointer' : 'not-allowed',
+                  fontSize: 'clamp(13px, 4vw, 15px)',
+                  fontWeight: '500',
+                }}
+              >
+                导入粘贴内容
+              </button>
+            </>
+          ) : (
+            <>
+              <div
+                style={{
+                  minHeight: '180px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  textAlign: 'center',
+                  gap: '16px',
+                  padding: '20px 16px',
+                }}
+              >
+                <div style={{ fontSize: 'clamp(28px, 10vw, 40px)' }}>⏳</div>
+
+                <div>
+                  <div style={{ color: '#f2f6fd', fontSize: 'clamp(13px, 4vw, 16px)', marginBottom: '12px', fontWeight: '500' }}>
+                    正在导入词卡...
+                  </div>
+                  <div style={{ color: '#7ce1d7', fontSize: 'clamp(18px, 6vw, 28px)', fontWeight: 'bold', letterSpacing: '1px' }}>
+                    {progress.current} / {progress.total}
+                  </div>
+                </div>
+
+                {/* 进度条 - 移动端友好 */}
+                <div
+                  style={{
+                    width: '100%',
+                    maxWidth: '300px',
+                    height: '10px',
+                    background: '#1a3a3a',
+                    borderRadius: '5px',
+                    overflow: 'hidden',
+                    marginTop: '8px',
+                  }}
+                >
+                  <div
+                    style={{
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #7ce1d7, #59cfc4)',
+                      width: `${Math.round((progress.current / progress.total) * 100)}%`,
+                      transition: 'width 0.3s ease',
+                    }}
+                  />
+                </div>
+
+                <div style={{ color: '#9aabc1', fontSize: 'clamp(11px, 3vw, 13px)', marginTop: '12px' }}>
+                  {Math.round((progress.current / progress.total) * 100)}% 完成
+                </div>
+
+                <div style={{ color: '#7ce1d7', fontSize: 'clamp(11px, 3vw, 12px)', marginTop: '8px', fontStyle: 'italic' }}>
+                  请勿关闭或刷新此页面
+                </div>
+              </div>
+            </>
+          )}
+        </section>
+
+        <section>
+          <h2>完整备份</h2>
+          <p>备份包含词条、各角度复习进度、评分记录和设置，可在其他设备完整恢复。</p>
+          <button
+            onClick={async () =>
+              download(
+                `WordReels6备份-${new Date().toISOString().slice(0, 10)}.json`,
+                JSON.stringify(await createBackup(), null, 2)
+              )
+            }
+            disabled={isImporting}
+          >
+            下载完整备份
+          </button>
+          <small>GitHub Pages 只保存程序。手机中的词库和进度保存在该手机浏览器内。</small>
+
+          <div className="danger-zone">
+            <h3>清空学习数据</h3>
+            <p>删除全部词条和学习单元，但保留设置和复习历史统计。</p>
+            <button
+              className="danger"
+              onClick={() => void clearAll()}
+              disabled={isImporting}
+            >
+              清空全部词卡与进度
+            </button>
+          </div>
+        </section>
+      </div>
+
+      {isImporting && (
+        <div className="message" style={{ marginTop: '16px' }}>
+          📊 正在导入：{progress.current} / {progress.total}（请勿关闭此页面）
+        </div>
+      )}
+      {message && <div className="message">{message}</div>}
+    </main>
+  )
 }
 
 function Settings({ enabled, onChange }: { enabled: StudyAngle[]; onChange: (angles: StudyAngle[]) => void }) {
@@ -303,6 +523,13 @@ export default function App() {
     return units.reduce((count, unit) => count + (unit.dueAt <= now ? 1 : 0), 0)
   }, [units])
   useEffect(() => { void refresh(); void getSetting<StudyAngle[]>('enabledAngles', angles).then(setEnabled) }, [refresh])
-  const nav: Array<{ id: View; icon: string; label: string }> = [{ id: 'review', icon: '▱', label: '今日复习' }, { id: 'stats', icon: '▤', label: '统计' }, { id: 'library', icon: '⌕', label: '词库' }, { id: 'transfer', icon: '⇅', label: '导入与备份' }, { id: 'settings', icon: '⚙', label: '设置' }]
-  return <div className="app"><aside><div className="brand"><i>W</i><div><b>WordReels</b><span>GERMAN · v6</span></div></div><nav>{nav.map(item => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><i>{item.icon}</i><span>{item.label}</span></button>)}</nav><footer><span>{entries.length} 词条</span><small>{dueUnitCount} 到期单元</small></footer></aside><div className="mobile-nav">{nav.map(item => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><i>{item.icon}</i><span>{item.label}</span></button>)}</div><section className="content">{view === 'review' && <Review entries={entries} units={units} refresh={refresh} onReviewed={onReviewed} enabledAngles={enabled} />}{view === 'stats' && <Stats logs={logs} units={units} entries={entries} />}{view === 'library' && <Library entries={entries} units={units} refresh={refresh} />}{view === 'transfer' && <Transfer refresh={refresh} />}{view === 'settings' && <Settings enabled={enabled} onChange={setEnabled} />}</section></div>
+  const nav: Array<{ id: View; icon: string; label: string }> = [
+    { id: 'review', icon: '▱', label: '今日复习' },
+    { id: 'acquisition', icon: '🌱', label: '语境习得' },
+    { id: 'stats', icon: '▤', label: '统计' },
+    { id: 'library', icon: '⌕', label: '词库' },
+    { id: 'transfer', icon: '⇅', label: '导入与备份' },
+    { id: 'settings', icon: '⚙', label: '设置' },
+  ]
+  return <div className="app"><aside><div className="brand"><i>W</i><div><b>WordReels</b><span>GERMAN · v6</span></div></div><nav>{nav.map(item => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><i>{item.icon}</i><span>{item.label}</span></button>)}</nav><footer><span>{entries.length} 词条</span><small>{dueUnitCount} 到期单元</small></footer></aside><div className="mobile-nav">{nav.map(item => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><i>{item.icon}</i><span>{item.label}</span></button>)}</div><section className="content">{view === 'review' && <Review entries={entries} units={units} refresh={refresh} onReviewed={onReviewed} enabledAngles={enabled} />}{view === 'acquisition' && <Acquisition />}{view === 'stats' && <Stats logs={logs} units={units} entries={entries} />}{view === 'library' && <Library entries={entries} units={units} refresh={refresh} />}{view === 'transfer' && <Transfer refresh={refresh} />}{view === 'settings' && <Settings enabled={enabled} onChange={setEnabled} />}</section></div>
 }
