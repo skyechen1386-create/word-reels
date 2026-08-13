@@ -81,4 +81,5 @@ export interface Backup {
   logs: ReviewLog[]
   settings: Record<string, unknown>
   images?: Array<{ entryId: string; base64: string; type: string }>
+  acquisitionProgress?: unknown[] // 独立的习得进度，类型来自 acquisitionTypes.ts
 }
