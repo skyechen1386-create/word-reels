@@ -2,11 +2,12 @@ export type StudyAngle = 'recognition' | 'production' | 'meaning_context' | 'pro
 export type Rating = 1 | 2 | 3 | 4 | 5
 
 export interface LocalizedText { de?: string; zh?: string }
+export interface ExampleSentence { de: string; zh?: string }
 export interface RankedContext { sceneZh?: string; patternDe?: string; exampleDe?: string; exampleZh?: string }
 export interface RankedMeaning { rank: number; zh: string; usageZh?: string; de?: string; contexts?: RankedContext[] }
 export interface WordPart { part: string; meaningZh?: string; meaningDe?: string; role?: string }
 export interface ConnectionMemory { type?: string; de?: string; zh?: string; title?: string; content?: string }
-export interface Collocation { de: string; zh?: string; exampleDe?: string; exampleZh?: string }
+export interface Collocation { de: string; zh?: string; exampleDe?: string; exampleZh?: string; examples?: ExampleSentence[] }
 
 export interface WordEntry {
   schema: string
@@ -24,12 +25,12 @@ export interface WordEntry {
   connectionMemory?: ConnectionMemory[] | { links?: ConnectionMemory[]; textZh?: string }
   mnemonic?: { zh?: string; textZh?: string; de?: string; warningZh?: string }
   collocations?: Collocation[]
+  examples?: ExampleSentence[]
   tags?: string[]
   myNote?: string
   source?: string
   createdAt?: number
   updatedAt?: number
-  myNote?: string // 自己写的个人化联想/记忆点，只有自己看得懂也没关系，随时可编辑
   [key: string]: unknown
 }
 

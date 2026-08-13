@@ -97,12 +97,16 @@ function FullEntry({ entry, focus, onNoteChange }: { entry: WordEntry; focus?: R
       {parts.length > 0 && <Section title="构词拆解"><div className="parts">{parts.map((part, index) => <span key={index}><b>{part.part}</b><small>{part.meaningZh || part.meaningDe}</small></span>)}</div><p>{entry.wordBuilding?.structureZh}</p>{(entry.wordBuilding?.notesZh || []).map((note, i) => <small className="block" key={i}>{note}</small>)}</Section>}
       {connections.length > 0 && <Section title="联系辅助记忆"><div className="connection-list">{connections.map((item, index) => <p key={index}><b>{item.de || item.title || item.content}</b><span>{item.zh}</span></p>)}</div></Section>}
       {(entry.mnemonic?.zh || entry.mnemonic?.textZh || entry.mnemonic?.de) && <Section title="人为联想"><p className="de-line">{entry.mnemonic?.de}</p><p>{entry.mnemonic?.zh || entry.mnemonic?.textZh}</p>{entry.mnemonic?.warningZh && <small className="warning">{entry.mnemonic.warningZh}</small>}</Section>}
-      {(entry.collocations || []).length > 0 && <Section title="固定搭配与例句"><div className="collocations">{entry.collocations?.map((item, index) => <article key={index}><strong>{item.de}</strong><span>{item.zh}</span>{item.exampleDe && <p>{item.exampleDe}<small>{item.exampleZh}</small></p>}</article>)}</div></Section>}
+      {(entry.examples || []).length > 0 && <Section title="例句"><div className="reference-sentences">{entry.examples?.map((example, index) => <p key={index}>{example.de}{example.zh && <small>{example.zh}</small>}</p>)}</div></Section>}
+      {(entry.collocations || []).length > 0 && <Section title="固定搭配与例句"><div className="collocations">{entry.collocations?.map((item, index) => {
+        const examples = item.examples?.length ? item.examples : item.exampleDe ? [{ de: item.exampleDe, zh: item.exampleZh }] : []
+        return <article key={index}><strong>{item.de}</strong><span>{item.zh}</span>{examples.map((example, exampleIndex) => <p key={exampleIndex}>{example.de}<small>{example.zh}</small></p>)}</article>
+      })}</div></Section>}
     </div>
   </article>
 }
 
-function Review({ entries, units, refresh, enabledAngles }: { entries: WordEntry[]; units: ReviewUnit[]; refresh: () => Promise<void>; enabledAngles: StudyAngle[] }) {
+function Review({ entries, units, refresh, onReviewed, enabledAngles }: { entries: WordEntry[]; units: ReviewUnit[]; refresh: () => Promise<void>; onReviewed: (unit: ReviewUnit, log: ReviewLog) => void; enabledAngles: StudyAngle[] }) {
   const [scope, setScope] = useState<'due' | 'all'>('due'); const [selected, setSelected] = useState<StudyAngle[]>(enabledAngles)
   const [queue, setQueue] = useState<ReviewUnit[]>([]); const [index, setIndex] = useState(0); const [revealed, setRevealed] = useState(false)
   const [typed, setTyped] = useState(''); const [started, setStarted] = useState(false); const [shownAt, setShownAt] = useState(Date.now())
@@ -122,18 +126,23 @@ function Review({ entries, units, refresh, enabledAngles }: { entries: WordEntry
     if (!tagFilter.length) return true
     const item = entryMap.get(entryId); return tagFilter.every(tag => (item?.tags || []).includes(tag))
   }, [entryMap, tagFilter])
-  const build = useCallback((nextScope = scope) => {
-    const now = Date.now(); const pool = units.filter(item => selected.includes(item.angle) && matchesTags(item.entryId) && (nextScope === 'all' || item.dueAt <= now))
-    setQueue(secureShuffle(pool)); setIndex(0); setRevealed(false); setTyped(''); setStarted(true); setShownAt(Date.now())
-  }, [scope, selected, units, matchesTags])
+  const availableUnits = useMemo(() => {
+    const now = Date.now()
+    const selectedAngles = new Set(selected)
+    return units.filter(item => selectedAngles.has(item.angle) && matchesTags(item.entryId) && (scope === 'all' || item.dueAt <= now))
+  }, [matchesTags, scope, selected, units])
+  const build = useCallback(() => {
+    setQueue(secureShuffle(availableUnits)); setIndex(0); setRevealed(false); setTyped(''); setStarted(true); setShownAt(Date.now())
+  }, [availableUnits])
   const rate = useCallback(async (rating: Rating) => {
     if (!unit || !revealed) return; const reviewedAt = Date.now(); const updated = schedule(unit, rating, reviewedAt)
     const log: ReviewLog = { unitId: unit.id, entryId: unit.entryId, angle: unit.angle, rating, responseTimeMs: reviewedAt - shownAt, reviewedAt, dueAt: updated.dueAt }
     if (unit.angle === 'production') log.typed = !!typed.trim()
     await saveReview(updated, log)
+    onReviewed(updated, log)
     setQueue(current => { const next = [...current]; next[index] = updated; if (rating === 1) next.splice(Math.min(next.length, index + 4 + Math.floor(Math.random() * 4)), 0, updated); return next })
-    setIndex(value => value + 1); setRevealed(false); setTyped(''); setShownAt(Date.now()); setDragX(0); setDragLabel(''); await refresh()
-  }, [index, refresh, revealed, shownAt, typed, unit])
+    setIndex(value => value + 1); setRevealed(false); setTyped(''); setShownAt(Date.now()); setDragX(0); setDragLabel('')
+  }, [index, onReviewed, revealed, shownAt, typed, unit])
   const requestReveal = useCallback(() => {
     if (revealed) return
     if (unit?.angle === 'production' && !typed.trim() && !confirm('确定不试着写写看吗？主动回忆效果更好，但你也可以直接看答案。')) return
@@ -151,7 +160,7 @@ function Review({ entries, units, refresh, enabledAngles }: { entries: WordEntry
     const next = [...customPresets, preset]; setCustomPresets(next); await setSetting('customPresets', next)
   }
   const removePreset = async (id: string) => { const next = customPresets.filter(item => item.id !== id); setCustomPresets(next); await setSetting('customPresets', next) }
-  const totalAvailable = units.filter(item => selected.includes(item.angle) && matchesTags(item.entryId) && (scope === 'all' || item.dueAt <= Date.now())).length
+  const totalAvailable = availableUnits.length
   const bucketFromDx = (dx: number, width: number): Rating => {
     const half = Math.max(60, width / 2); const clamped = Math.max(-half, Math.min(half, dx))
     const ratio = (clamped + half) / (half * 2)
@@ -210,12 +219,34 @@ function Review({ entries, units, refresh, enabledAngles }: { entries: WordEntry
 
 function Library({ entries, units, refresh }: { entries: WordEntry[]; units: ReviewUnit[]; refresh: () => Promise<void> }) {
   const [query, setQuery] = useState(''); const [opened, setOpened] = useState<WordEntry>(); const [tagFilter, setTagFilter] = useState<string[]>([])
+  const [page, setPage] = useState(1)
+  const pageSize = 50
   const allTags = useMemo(() => Array.from(new Set(entries.flatMap(item => item.tags || []))).sort((a, b) => a.localeCompare(b, 'de')), [entries])
-  const toggleTag = (tag: string) => setTagFilter(current => current.includes(tag) ? current.filter(item => item !== tag) : [...current, tag])
-  const filtered = entries.filter(item => `${item.displayForm} ${item.lemma} ${item.dictionaryMeaning?.directZh?.join(' ')}`.toLowerCase().includes(query.toLowerCase()) && tagFilter.every(tag => (item.tags || []).includes(tag))).sort((a, b) => a.lemma.localeCompare(b.lemma, 'de'))
-  return <main className="page"><header className="page-title"><div><span>WORD LIBRARY</span><h1>词库</h1><p>{entries.length} 个词条 · {units.length} 个独立学习单元</p></div><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索德语或中文" /></header>
-    {allTags.length > 0 && <div className="angle-filter tag-filter"><span>标签筛选</span>{allTags.map(tag => <button key={tag} className={tagFilter.includes(tag) ? 'active' : ''} onClick={() => toggleTag(tag)}>{tag}</button>)}{tagFilter.length > 0 && <button className="clear-tags" onClick={() => setTagFilter([])}>清除</button>}</div>}
-    {opened ? <div className="detail-wrap"><button className="back" onClick={() => setOpened(undefined)}>← 返回词库</button><FullEntry entry={opened} onNoteChange={note => { void setEntryNote(opened.id, note).then(refresh) }} /><ImageManager entry={opened} refresh={refresh} /><button className="danger" onClick={async () => { if (confirm(`删除 ${opened.displayForm}？`)) { await removeEntry(opened.id); setOpened(undefined); await refresh() } }}>删除此词条</button></div> : <div className="word-list">{filtered.map(entry => <button key={entry.id} onClick={() => setOpened(entry)}><div><strong>{entry.displayForm}</strong><span>{entry.dictionaryMeaning?.directZh?.join('；') || entry.definition?.zh}</span></div><Badges entry={entry} /><em>{units.filter(unit => unit.entryId === entry.id).length} 角度</em></button>)}</div>}</main>
+  const unitCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const unit of units) counts.set(unit.entryId, (counts.get(unit.entryId) || 0) + 1)
+    return counts
+  }, [units])
+  const filtered = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase('de')
+    return entries
+      .filter(item => `${item.displayForm} ${item.lemma} ${item.dictionaryMeaning?.directZh?.join(' ')}`.toLocaleLowerCase('de').includes(normalizedQuery)
+        && tagFilter.every(tag => (item.tags || []).includes(tag)))
+      .sort((a, b) => a.lemma.localeCompare(b.lemma, 'de'))
+  }, [entries, query, tagFilter])
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const currentPage = Math.min(page, pageCount)
+  const visibleEntries = useMemo(() => filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize), [currentPage, filtered])
+  const toggleTag = (tag: string) => { setTagFilter(current => current.includes(tag) ? current.filter(item => item !== tag) : [...current, tag]); setPage(1) }
+  const changeQuery = (value: string) => { setQuery(value); setPage(1) }
+  const clearTags = () => { setTagFilter([]); setPage(1) }
+  return <main className="page"><header className="page-title"><div><span>WORD LIBRARY</span><h1>词库</h1><p>{entries.length} 个词条 · {units.length} 个独立学习单元</p></div><input value={query} onChange={event => changeQuery(event.target.value)} placeholder="搜索德语或中文" /></header>
+    {allTags.length > 0 && <div className="angle-filter tag-filter"><span>标签筛选</span>{allTags.map(tag => <button key={tag} className={tagFilter.includes(tag) ? 'active' : ''} onClick={() => toggleTag(tag)}>{tag}</button>)}{tagFilter.length > 0 && <button className="clear-tags" onClick={clearTags}>清除</button>}</div>}
+    {opened ? <div className="detail-wrap"><button className="back" onClick={() => setOpened(undefined)}>← 返回词库</button><FullEntry entry={opened} onNoteChange={note => { void setEntryNote(opened.id, note).then(refresh) }} /><ImageManager entry={opened} refresh={refresh} /><button className="danger" onClick={async () => { if (confirm(`删除 ${opened.displayForm}？`)) { await removeEntry(opened.id); setOpened(undefined); await refresh() } }}>删除此词条</button></div> : <>
+      <div className="library-summary">显示 {filtered.length ? (currentPage - 1) * pageSize + 1 : 0}–{Math.min(currentPage * pageSize, filtered.length)}，共 {filtered.length} 条</div>
+      <div className="word-list">{visibleEntries.map(entry => <button key={entry.id} onClick={() => setOpened(entry)}><div><strong>{entry.displayForm}</strong><span>{entry.dictionaryMeaning?.directZh?.join('；') || entry.definition?.zh}</span></div><Badges entry={entry} /><em>{unitCounts.get(entry.id) || 0} 角度</em></button>)}</div>
+      {pageCount > 1 && <nav className="pagination" aria-label="词库分页"><button disabled={currentPage === 1} onClick={() => setPage(value => Math.max(1, value - 1))}>← 上一页</button><span>第 {currentPage} / {pageCount} 页</span><button disabled={currentPage === pageCount} onClick={() => setPage(value => Math.min(pageCount, value + 1))}>下一页 →</button></nav>}
+    </>}</main>
 }
 
 function Transfer({ refresh }: { refresh: () => Promise<void> }) {
@@ -263,7 +294,15 @@ function Stats({ logs, units, entries }: { logs: ReviewLog[]; units: ReviewUnit[
 export default function App() {
   const [view, setView] = useState<View>('review'); const [entries, setEntries] = useState<WordEntry[]>([]); const [units, setUnits] = useState<ReviewUnit[]>([]); const [logs, setLogs] = useState<ReviewLog[]>([]); const [enabled, setEnabled] = useState<StudyAngle[]>(angles)
   const refresh = useCallback(async () => { setEntries(await allEntries()); setUnits(await allUnits()); setLogs(await allLogs()) }, [])
+  const onReviewed = useCallback((updated: ReviewUnit, log: ReviewLog) => {
+    setUnits(current => current.map(unit => unit.id === updated.id ? updated : unit))
+    setLogs(current => [...current, log])
+  }, [])
+  const dueUnitCount = useMemo(() => {
+    const now = Date.now()
+    return units.reduce((count, unit) => count + (unit.dueAt <= now ? 1 : 0), 0)
+  }, [units])
   useEffect(() => { void refresh(); void getSetting<StudyAngle[]>('enabledAngles', angles).then(setEnabled) }, [refresh])
   const nav: Array<{ id: View; icon: string; label: string }> = [{ id: 'review', icon: '▱', label: '今日复习' }, { id: 'stats', icon: '▤', label: '统计' }, { id: 'library', icon: '⌕', label: '词库' }, { id: 'transfer', icon: '⇅', label: '导入与备份' }, { id: 'settings', icon: '⚙', label: '设置' }]
-  return <div className="app"><aside><div className="brand"><i>W</i><div><b>WordReels</b><span>GERMAN · v6</span></div></div><nav>{nav.map(item => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><i>{item.icon}</i><span>{item.label}</span></button>)}</nav><footer><span>{entries.length} 词条</span><small>{units.filter(item => item.dueAt <= Date.now()).length} 到期单元</small></footer></aside><div className="mobile-nav">{nav.map(item => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><i>{item.icon}</i><span>{item.label}</span></button>)}</div><section className="content">{view === 'review' && <Review entries={entries} units={units} refresh={refresh} enabledAngles={enabled} />}{view === 'stats' && <Stats logs={logs} units={units} entries={entries} />}{view === 'library' && <Library entries={entries} units={units} refresh={refresh} />}{view === 'transfer' && <Transfer refresh={refresh} />}{view === 'settings' && <Settings enabled={enabled} onChange={setEnabled} />}</section></div>
+  return <div className="app"><aside><div className="brand"><i>W</i><div><b>WordReels</b><span>GERMAN · v6</span></div></div><nav>{nav.map(item => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><i>{item.icon}</i><span>{item.label}</span></button>)}</nav><footer><span>{entries.length} 词条</span><small>{dueUnitCount} 到期单元</small></footer></aside><div className="mobile-nav">{nav.map(item => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}><i>{item.icon}</i><span>{item.label}</span></button>)}</div><section className="content">{view === 'review' && <Review entries={entries} units={units} refresh={refresh} onReviewed={onReviewed} enabledAngles={enabled} />}{view === 'stats' && <Stats logs={logs} units={units} entries={entries} />}{view === 'library' && <Library entries={entries} units={units} refresh={refresh} />}{view === 'transfer' && <Transfer refresh={refresh} />}{view === 'settings' && <Settings enabled={enabled} onChange={setEnabled} />}</section></div>
 }

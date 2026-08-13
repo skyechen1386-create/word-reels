@@ -75,10 +75,12 @@ function normalizeCollocations(value: unknown) {
     const source = object(item)
     const examples = Array.isArray(source.examples) ? source.examples.map(object) : []
     const first = examples[0] || {}
+    const normalizedExamples = examples.map(example => ({ de: text(example.de), zh: text(example.zh) })).filter(example => example.de)
     return {
       de: text(source.de), zh: text(source.zh),
       exampleDe: text(source.exampleDe) || text(first.de),
       exampleZh: text(source.exampleZh) || text(first.zh),
+      examples: normalizedExamples,
     }
   }).filter(item => item.de)
 }
@@ -192,9 +194,19 @@ function blankTarget(value: string, entry: WordEntry) {
 
 export function referenceSentences(entry: WordEntry): Array<{ de: string; zh?: string }> {
   const output: Array<{ de: string; zh?: string }> = []
-  for (const item of entry.collocations || []) if (item.exampleDe) output.push({ de: item.exampleDe, zh: item.exampleZh })
+  for (const item of entry.examples || []) if (item.de) output.push({ de: item.de, zh: item.zh })
+  for (const item of entry.collocations || []) {
+    if (item.exampleDe) output.push({ de: item.exampleDe, zh: item.exampleZh })
+    for (const example of item.examples || []) if (example.de) output.push({ de: example.de, zh: example.zh })
+  }
   for (const meaning of entry.rankedMeanings || []) for (const context of meaning.contexts || []) if (context.exampleDe) output.push({ de: context.exampleDe, zh: context.exampleZh })
-  return output
+  const seen = new Set<string>()
+  return output.filter(item => {
+    const key = item.de.trim().toLocaleLowerCase('de')
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 export function makeImageUnit(entry: WordEntry): ReviewUnit {
